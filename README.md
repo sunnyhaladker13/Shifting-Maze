@@ -6,13 +6,26 @@ A dynamic maze game where you navigate through an ever-shrinking labyrinth while
 
 ## 🎮 Play the Game
 
-You can play Shifting Maze by opening `index.html` in any modern web browser.
+You can play Shifting Maze by opening `index.html` in any modern web browser on both desktop and mobile devices.
 
 ## 🔑 Game Controls
 
-- **Move**: Arrow keys or WASD
-- **Restart Level**: Press 'R' key
-- **Toggle Sound**: Press 'M' key
+- **Desktop**:
+  - **Move**: Arrow keys or WASD
+  - **Restart Level**: Press 'R' key
+  - **Toggle Sound**: Press 'M' key
+- **Mobile**:
+  - **Move**: Swipe in desired direction or use on-screen control pad
+  - **Restart Level**: Double tap the screen
+  - **Toggle Sound**: Tap the sound icon in the top corner
+
+## 📱 Mobile Compatibility
+
+Shifting Maze is fully responsive and optimized for mobile devices:
+- **Touch Controls**: Intuitive swipe gestures and on-screen control pad
+- **Responsive Design**: Automatically adjusts to fit different screen sizes
+- **Portrait & Landscape**: Supports both orientations for optimal gameplay
+- **Performance Optimized**: Smooth experience even on lower-end devices
 
 ## 🎯 Gameplay
 
