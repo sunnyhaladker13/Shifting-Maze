@@ -1,6 +1,13 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreDisplay = document.getElementById('score');
+const gameContainer = document.getElementById('gameContainer');
+const soundToggle = document.getElementById('soundToggle');
+const controlPad = document.getElementById('controlPad');
+
+// --- Device Detection ---
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || 
+                (window.matchMedia && window.matchMedia("(max-width: 768px)").matches);
 
 // --- Enhanced Neobrutalist Color Palette ---
 const BG_COLOR = '#1a1a2e';      // Darker Blue-Gray
@@ -12,16 +19,87 @@ const PATH_COLOR = '#1a1a2e';     // Path color same as background
 const HIGHLIGHT_COLOR = '#4cc9f0'; // Cyan for highlights and effects
 
 // --- Game Settings ---
-const CELL_SIZE = 32; // Slightly larger cells
+let CELL_SIZE = 32; // Base size - will be adjusted for responsive display
+const BASE_CELL_SIZE = 32;
 const GRID_WIDTH = 21; // Use odd numbers for better maze generation
 const GRID_HEIGHT = 15; // Use odd numbers for better maze generation
-canvas.width = GRID_WIDTH * CELL_SIZE;
-canvas.height = GRID_HEIGHT * CELL_SIZE;
+let canvasWidth = GRID_WIDTH * CELL_SIZE;
+let canvasHeight = GRID_HEIGHT * CELL_SIZE;
 const FPS = 60; // Increased for smoother animation
 const SHRINK_RATE = 8000; // Time in milliseconds between map shrinks (longer to give more play time)
-const PLAYER_SPEED = CELL_SIZE / 6; // Faster movement for more dynamic gameplay
+let PLAYER_SPEED = CELL_SIZE / 6; // Speed will also scale
 const WALL_THICKNESS = 5; // Thicker walls for better visibility
 const GLOW_INTENSITY = 15; // Size of glow effect in pixels
+
+// --- Responsive Canvas Sizing ---
+function resizeCanvas() {
+    const maxWidth = Math.min(window.innerWidth - 20, 800);
+    const maxHeight = Math.min(window.innerHeight - 80, 600);
+    
+    // Calculate the appropriate cell size
+    const horizontalCellSize = maxWidth / GRID_WIDTH;
+    const verticalCellSize = maxHeight / GRID_HEIGHT;
+    CELL_SIZE = Math.floor(Math.min(horizontalCellSize, verticalCellSize));
+    
+    // Ensure minimum size
+    CELL_SIZE = Math.max(CELL_SIZE, 16);
+    
+    // Update canvas dimensions
+    canvasWidth = GRID_WIDTH * CELL_SIZE;
+    canvasHeight = GRID_HEIGHT * CELL_SIZE;
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    
+    // Scale player speed based on cell size ratio
+    PLAYER_SPEED = CELL_SIZE / 6;
+}
+
+// Initialize canvas size
+resizeCanvas();
+window.addEventListener('resize', () => {
+    resizeCanvas();
+    if (gameState === 'playing') {
+        // Adjust player, enemies and items positions based on new cell size
+        adjustGameElementsForResize();
+    }
+});
+
+// Function to adjust game elements after resize
+function adjustGameElementsForResize() {
+    // Adjust player position
+    const playerGridX = Math.floor(player.x / (canvas.width / GRID_WIDTH));
+    const playerGridY = Math.floor(player.y / (canvas.height / GRID_HEIGHT));
+    player.x = (playerGridX + 0.5) * CELL_SIZE;
+    player.y = (playerGridY + 0.5) * CELL_SIZE;
+    player.size = CELL_SIZE * 0.6;
+    
+    // Adjust enemies
+    enemies.forEach(enemy => {
+        const enemyGridX = Math.floor(enemy.x / (canvas.width / GRID_WIDTH));
+        const enemyGridY = Math.floor(enemy.y / (canvas.height / GRID_HEIGHT));
+        enemy.x = (enemyGridX + 0.5) * CELL_SIZE;
+        enemy.y = (enemyGridY + 0.5) * CELL_SIZE;
+        enemy.size = enemy.type === ENEMY_TYPES.CHASER ? CELL_SIZE * 0.7 : CELL_SIZE * 0.65;
+    });
+    
+    // Adjust gems
+    gems.forEach(gem => {
+        const gemGridX = gem.gridX;
+        const gemGridY = gem.gridY;
+        gem.x = (gemGridX + 0.5) * CELL_SIZE;
+        gem.y = (gemGridY + 0.5) * CELL_SIZE;
+        gem.size = CELL_SIZE * 0.4;
+    });
+    
+    // Adjust power-ups
+    powerUps.forEach(powerUp => {
+        const puGridX = Math.floor(powerUp.x / (canvas.width / GRID_WIDTH));
+        const puGridY = Math.floor(powerUp.y / (canvas.height / GRID_HEIGHT));
+        powerUp.x = (puGridX + 0.5) * CELL_SIZE;
+        powerUp.y = (puGridY + 0.5) * CELL_SIZE;
+        powerUp.size = CELL_SIZE * 0.5;
+    });
+}
 
 // --- Sound Effects ---
 let soundEnabled = true;
@@ -34,6 +112,11 @@ const sounds = {
     gameOver: null,
     powerUp: null
 };
+
+// Update sound toggle button to reflect current state
+function updateSoundToggleUI() {
+    soundToggle.textContent = soundEnabled ? '🔊' : '🔇';
+}
 
 // Initialize sounds
 function initSounds() {
@@ -318,7 +401,9 @@ const player = {
         ghost: 0        // Timer for passing through walls (frames)
     },
     baseSpeed: PLAYER_SPEED,
-    angle: 0 // For rotation animation
+    angle: 0, // For rotation animation
+    touchActive: false, // flag for continuous movement on touch devices
+    touchDirection: { x: 0, y: 0 } // direction from touch input
 };
 
 // --- Gems ---
@@ -510,6 +595,12 @@ function updatePlayer() {
         player.powerUps.speed--;
     }
 
+    // Apply touch-based movement if active
+    if (player.touchActive) {
+        player.targetVx = player.touchDirection.x;
+        player.targetVy = player.touchDirection.y;
+    }
+
     // Update trail
     if (player.vx !== 0 || player.vy !== 0) {
         player.trail.push({x: player.x, y: player.y});
@@ -655,667 +746,23 @@ function checkGemCollision() {
 }
 
 // --- Draw Functions ---
-function drawRect(x, y, width, height, color, withGlow = false) {
-    ctx.fillStyle = color;
-    if (withGlow) {
-        ctx.shadowBlur = GLOW_INTENSITY;
-        ctx.shadowColor = color;
-    }
-    ctx.fillRect(x, y, width, height);
-    if (withGlow) {
-        ctx.shadowBlur = 0;
-    }
-}
-
-function drawCircle(x, y, radius, color, withGlow = false) {
-    ctx.fillStyle = color;
-    if (withGlow) {
-        ctx.shadowBlur = GLOW_INTENSITY;
-        ctx.shadowColor = color;
-    }
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-    if (withGlow) {
-        ctx.shadowBlur = 0;
-    }
-}
-
-function drawMaze() {
-    // Draw background
-    drawRect(0, 0, canvas.width, canvas.height, PATH_COLOR);
-    
-    // Draw walls
-    ctx.fillStyle = WALL_COLOR;
-    
-    for (let y = 0; y < GRID_HEIGHT; y++) {
-        for (let x = 0; x < GRID_WIDTH; x++) {
-            if (grid[y][x] === 1) {
-                // Draw wall cells with subtle glow
-                drawRect(
-                    x * CELL_SIZE, 
-                    y * CELL_SIZE, 
-                    CELL_SIZE, 
-                    CELL_SIZE, 
-                    WALL_COLOR, 
-                    true
-                );
-            }
-        }
-    }
-
-    // Draw shrinking walls warning with animation effect
-    shrinkingWalls.forEach(wall => {
-        // Pulsating warning effect
-        const pulseSpeed = 0.03;
-        const pulseAmount = 0.5;
-        const alpha = 0.3 + Math.sin(Date.now() * pulseSpeed) * pulseAmount;
-        ctx.globalAlpha = alpha;
-        ctx.shadowBlur = GLOW_INTENSITY * 1.5;
-        ctx.shadowColor = ENEMY_COLOR;
-        ctx.fillStyle = ENEMY_COLOR;
-        ctx.fillRect(wall.x * CELL_SIZE, wall.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
-        ctx.shadowBlur = 0;
-        ctx.globalAlpha = 1.0;
-    });
-
-    // Check if player is stuck - if the player is surrounded by walls on all sides
-    if (gameState === 'playing') {
-        const playerGridX = Math.floor(player.x / CELL_SIZE);
-        const playerGridY = Math.floor(player.y / CELL_SIZE);
-        const directions = [[0, -1], [0, 1], [-1, 0], [1, 0]]; // Up, Down, Left, Right
-        
-        let exit = false;
-        for (const [dx, dy] of directions) {
-            const nx = playerGridX + dx;
-            const ny = playerGridY + dy;
-            if (nx >= 0 && nx < GRID_WIDTH && ny >= 0 && ny < GRID_HEIGHT && grid[ny][nx] === 0) {
-                exit = true;
-                break;
-            }
-        }
-        
-        if (!exit) {
-            // Player is trapped - show quick restart button
-            drawQuickRestartPrompt();
-        }
-    }
-}
-
-// Add a quick restart prompt when player is trapped
-function drawQuickRestartPrompt() {
-    // Display prompt in the center of the screen
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(canvas.width/2 - 100, canvas.height/2 - 40, 200, 80);
-    ctx.strokeStyle = HIGHLIGHT_COLOR;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(canvas.width/2 - 100, canvas.height/2 - 40, 200, 80);
-    
-    // Pulsating text
-    const pulseAmount = Math.sin(Date.now() * 0.006) * 0.2 + 0.8;
-    ctx.fillStyle = HIGHLIGHT_COLOR;
-    ctx.shadowBlur = GLOW_INTENSITY;
-    ctx.shadowColor = HIGHLIGHT_COLOR;
-    ctx.font = `${18 * pulseAmount}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText("Trapped! Press 'R'", canvas.width/2, canvas.height/2);
-    ctx.shadowBlur = 0;
-    
-    // Add hint below
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '12px sans-serif';
-    ctx.fillText("to restart level", canvas.width/2, canvas.height/2 + 20);
-}
-
-function drawPlayer() {
-    // Draw trail first (oldest to newest)
-    for (let i = 0; i < player.trail.length; i++) {
-        const alpha = (i / player.trail.length) * 0.5;
-        const size = player.size * 0.5 * (i / player.trail.length);
-        ctx.globalAlpha = alpha;
-        // Different trail color based on active power-ups
-        let trailColor = PLAYER_COLOR;
-        if (player.powerUps.speed > 0) trailColor = '#00ff00';
-        if (player.powerUps.invincibility > 0) trailColor = '#ffff00';
-        if (player.powerUps.ghost > 0) trailColor = '#aaaaff';
-        drawCircle(player.trail[i].x, player.trail[i].y, size, trailColor);
-    }
-    ctx.globalAlpha = 1.0;
-
-    // Special visual effects based on power-ups
-    if (player.powerUps.invincibility > 0) {
-        // Draw shield effect
-        ctx.strokeStyle = '#ffff00';
-        ctx.lineWidth = 2;
-        ctx.globalAlpha = 0.7;
-        ctx.beginPath();
-        ctx.arc(player.x, player.y, player.size/2 + 5, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha = 1.0;
-    }
-    
-    if (player.powerUps.ghost > 0) {
-        // Semi-transparent player
-        ctx.globalAlpha = 0.6;
-    }
-
-    // Draw player with glow effect
-    if (player.vx !== 0 || player.vy !== 0) {
-        // Player is moving - draw direction indicator
-        const headSize = player.size * 0.6;
-        const bodySize = player.size * 0.8;
-        
-        ctx.save();
-        ctx.translate(player.x, player.y);
-        ctx.rotate(player.angle);
-        
-        // Draw body
-        ctx.shadowBlur = GLOW_INTENSITY;
-        ctx.shadowColor = PLAYER_COLOR;
-        ctx.fillStyle = PLAYER_COLOR;
-        ctx.beginPath();
-        ctx.arc(0, 0, bodySize/2, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Draw direction indicator (front part)
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(headSize/3, 0, headSize/3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        
-        ctx.restore();
-    } else {
-        // Player is stationary - simple circle
-        drawCircle(player.x, player.y, player.size/2, PLAYER_COLOR, true);
-    }
-    
-    // Reset alpha
-    ctx.globalAlpha = 1.0;
-}
-
-function drawGems() {
-    gems.forEach(gem => {
-        // Rotating gems with glow
-        ctx.save();
-        ctx.translate(gem.x, gem.y);
-        gem.angle += 0.02; // Rotate gems
-        ctx.rotate(gem.angle);
-        
-        // Diamond shape
-        ctx.shadowBlur = GLOW_INTENSITY;
-        ctx.shadowColor = GEM_COLOR;
-        ctx.fillStyle = GEM_COLOR;
-        ctx.beginPath();
-        const size = gem.size;
-        ctx.moveTo(0, -size/2);  // Top
-        ctx.lineTo(size/2, 0);   // Right
-        ctx.lineTo(0, size/2);   // Bottom
-        ctx.lineTo(-size/2, 0);  // Left
-        ctx.closePath();
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        
-        ctx.restore();
-    });
-}
-
-function drawEnemies() {
-    enemies.forEach(enemy => {
-        // Determine if player has invincibility
-        const playerInvincible = player.powerUps.invincibility > 0;
-        
-        // Draw enemy glow effect
-        ctx.shadowBlur = playerInvincible ? 0 : GLOW_INTENSITY; 
-        ctx.shadowColor = enemy.color;
-        
-        // Enemy appearance changes when player is invincible
-        if (playerInvincible) {
-            ctx.fillStyle = '#6666aa'; // Frightened color
-            ctx.globalAlpha = 0.7;
-        } else {
-            ctx.fillStyle = enemy.color;
-        }
-        
-        // Determine direction of movement
-        const angle = enemy.vx !== 0 || enemy.vy !== 0 
-            ? Math.atan2(enemy.vy, enemy.vx) 
-            : 0;
-        
-        ctx.save();
-        ctx.translate(enemy.x, enemy.y);
-        ctx.rotate(angle);
-        
-        const radius = enemy.size / 2;
-        
-        if (enemy.type === ENEMY_TYPES.CHASER) {
-            // CHASER - triangular top shape
-            ctx.beginPath();
-            ctx.arc(0, -radius/5, radius, Math.PI * 0.8, Math.PI * 0.2, true);
-            
-            // Add jagged bottom for aggressive appearance
-            const tentacleWidth = radius / 3;
-            ctx.lineTo(radius, radius);
-            ctx.lineTo(radius - tentacleWidth, radius/2);
-            ctx.lineTo(radius - 2*tentacleWidth, radius);
-            ctx.lineTo(radius - 3*tentacleWidth, radius/2);
-            ctx.lineTo(-radius + 3*tentacleWidth, radius/2);
-            ctx.lineTo(-radius + 2*tentacleWidth, radius);
-            ctx.lineTo(-radius + tentacleWidth, radius/2);
-            ctx.lineTo(-radius, radius);
-            ctx.closePath();
-            ctx.fill();
-            
-        } else { // WANDERER
-            // More rounded top shape
-            ctx.beginPath();
-            ctx.arc(0, 0, radius, 0, Math.PI * 2);
-            ctx.fill();
-            
-            // Add small antennas to wanderers
-            ctx.strokeStyle = enemy.color;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(-radius/2, -radius/2);
-            ctx.lineTo(-radius/2, -radius);
-            ctx.moveTo(radius/2, -radius/2);
-            ctx.lineTo(radius/2, -radius);
-            ctx.stroke();
-        }
-        
-        // Eye whites - common to both types
-        ctx.fillStyle = "#ffffff";
-        const eyeRadius = radius / 3;
-        const blinking = enemy.eyes.blinkTimer < 5; // Blink occasionally
-        
-        if (!blinking) {
-            ctx.beginPath();
-            ctx.arc(-radius/3, -radius/5, eyeRadius, 0, Math.PI * 2);
-            ctx.arc(radius/3, -radius/5, eyeRadius, 0, Math.PI * 2);
-            ctx.fill();
-            
-            // Eye pupils look toward player
-            const pupilOffset = eyeRadius * 0.4;
-            ctx.fillStyle = playerInvincible ? "#6666aa" : "#000000";
-            const pupilRadius = eyeRadius / 2;
-            
-            // Adjust pupil position to look toward player
-            const eyeAngle = enemy.eyes.angle - angle; // Adjust for enemy rotation
-            const pupilX = Math.cos(eyeAngle) * pupilOffset;
-            const pupilY = Math.sin(eyeAngle) * pupilOffset;
-            
-            ctx.beginPath();
-            ctx.arc(-radius/3 + pupilX, -radius/5 + pupilY, pupilRadius, 0, Math.PI * 2);
-            ctx.arc(radius/3 + pupilX, -radius/5 + pupilY, pupilRadius, 0, Math.PI * 2);
-            ctx.fill();
-        } else {
-            // Draw closed eyes (blinking)
-            ctx.strokeStyle = playerInvincible ? "#6666aa" : "#000000";
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(-radius/3 - eyeRadius/2, -radius/5);
-            ctx.lineTo(-radius/3 + eyeRadius/2, -radius/5);
-            ctx.moveTo(radius/3 - eyeRadius/2, -radius/5);
-            ctx.lineTo(radius/3 + eyeRadius/2, -radius/5);
-            ctx.stroke();
-        }
-        
-        ctx.restore();
-        ctx.shadowBlur = 0;
-        ctx.globalAlpha = 1.0;
-    });
-}
-
-function drawParticles() {
-    // Update and draw particles
-    particles = particles.filter(p => {
-        const isAlive = p.update();
-        if (isAlive) p.draw();
-        return isAlive;
-    });
-}
-
-function drawPowerUps() {
-    powerUps.forEach(powerUp => {
-        powerUp.update();
-        powerUp.draw();
-    });
-}
-
-function drawActiveEffects() {
-    // Draw UI indicators for active power-ups
-    const indicatorSize = 25;
-    const margin = 10;
-    let offsetY = CELL_SIZE * 0.5;
-    
-    if (player.powerUps.speed > 0) {
-        ctx.fillStyle = '#00ff00';
-        const timeLeft = player.powerUps.speed / FPS;
-        ctx.globalAlpha = 0.8;
-        ctx.fillRect(margin, offsetY, indicatorSize, indicatorSize);
-        ctx.globalAlpha = 1.0;
-        ctx.strokeStyle = '#ffffff';
-        ctx.strokeRect(margin, offsetY, indicatorSize, indicatorSize);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '12px sans-serif';
-        ctx.fillText(Math.ceil(timeLeft), margin + indicatorSize/2 - 4, offsetY + indicatorSize/2 + 4);
-        offsetY += indicatorSize + margin;
-    }
-    
-    if (player.powerUps.invincibility > 0) {
-        ctx.fillStyle = '#ffff00';
-        const timeLeft = player.powerUps.invincibility / FPS;
-        ctx.globalAlpha = 0.8;
-        ctx.fillRect(margin, offsetY, indicatorSize, indicatorSize);
-        ctx.globalAlpha = 1.0;
-        ctx.strokeStyle = '#ffffff';
-        ctx.strokeRect(margin, offsetY, indicatorSize, indicatorSize);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '12px sans-serif';
-        ctx.fillText(Math.ceil(timeLeft), margin + indicatorSize/2 - 4, offsetY + indicatorSize/2 + 4);
-        offsetY += indicatorSize + margin;
-    }
-    
-    if (player.powerUps.ghost > 0) {
-        ctx.fillStyle = '#aaaaff';
-        const timeLeft = player.powerUps.ghost / FPS;
-        ctx.globalAlpha = 0.8;
-        ctx.fillRect(margin, offsetY, indicatorSize, indicatorSize);
-        ctx.globalAlpha = 1.0;
-        ctx.strokeStyle = '#ffffff';
-        ctx.strokeRect(margin, offsetY, indicatorSize, indicatorSize);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '12px sans-serif';
-        ctx.fillText(Math.ceil(timeLeft), margin + indicatorSize/2 - 4, offsetY + indicatorSize/2 + 4);
-    }
-}
-
-function drawStartScreen() {
-    drawRect(0, 0, canvas.width, canvas.height, BG_COLOR);
-    
-    // Title with glow effect
-    ctx.fillStyle = HIGHLIGHT_COLOR;
-    ctx.shadowBlur = GLOW_INTENSITY * 2;
-    ctx.shadowColor = HIGHLIGHT_COLOR;
-    ctx.font = 'bold 40px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Shifting Maze', canvas.width / 2, canvas.height / 3);
-    ctx.shadowBlur = 0;
-
-    // Animated subtitle
-    const pulseAmount = Math.sin(Date.now() * 0.003) * 0.2 + 0.8;
-    ctx.fillStyle = PLAYER_COLOR;
-    ctx.font = `${20 * pulseAmount}px sans-serif`;
-    ctx.fillText('Press any key to start', canvas.width / 2, canvas.height / 2);
-    
-    // Controls
-    ctx.font = '16px sans-serif';
-    ctx.fillStyle = GEM_COLOR;
-    ctx.fillText('Use Arrow Keys or WASD to move', canvas.width / 2, canvas.height * 0.58);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '14px sans-serif';
-    ctx.fillText("Press 'R' to restart current level", canvas.width / 2, canvas.height * 0.63);
-    
-    // Power-up guide
-    ctx.font = '14px sans-serif';
-    ctx.fillStyle = '#00ff00';
-    ctx.fillText('Speed', canvas.width / 2 - 60, canvas.height * 0.7);
-    ctx.fillStyle = '#ffff00';
-    ctx.fillText('Invincibility', canvas.width / 2, canvas.height * 0.7);
-    ctx.fillStyle = '#aaaaff';
-    ctx.fillText('Ghost', canvas.width / 2 + 60, canvas.height * 0.7);
-    
-    ctx.font = '10px sans-serif';
-    ctx.fillStyle = '#ccc';
-    ctx.fillText('Made with love by Sunny: https://www.linkedin.com/in/sunnyhaladker/', canvas.width / 2, canvas.height * 0.9);
-    
-    // Draw some animated particles for visual interest
-    if (Math.random() < 0.05) {
-        createParticles(
-            Math.random() * canvas.width, 
-            Math.random() * canvas.height,
-            [GEM_COLOR, PLAYER_COLOR, HIGHLIGHT_COLOR][Math.floor(Math.random() * 3)],
-            3
-        );
-    }
-    drawParticles();
-}
-
-function drawGameOverScreen() {
-    // Semi-transparent overlay with cool effect
-    const gradient = ctx.createRadialGradient(
-        canvas.width/2, canvas.height/2, 50,
-        canvas.width/2, canvas.height/2, canvas.width/2
-    );
-    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.3)');
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0.9)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Game Over text with glow
-    ctx.fillStyle = ENEMY_COLOR;
-    ctx.shadowBlur = GLOW_INTENSITY * 2;
-    ctx.shadowColor = ENEMY_COLOR;
-    ctx.font = 'bold 50px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Game Over!', canvas.width / 2, canvas.height / 3);
-    ctx.shadowBlur = 0;
-    
-    // Score with glow
-    ctx.fillStyle = GEM_COLOR;
-    ctx.shadowBlur = GLOW_INTENSITY;
-    ctx.shadowColor = GEM_COLOR;
-    ctx.font = 'bold 30px sans-serif';
-    ctx.fillText(`Final Score: ${score}`, canvas.width / 2, canvas.height / 2);
-    ctx.shadowBlur = 0;
-    
-    // Restart prompt with animation
-    const pulseAmount = Math.sin(Date.now() * 0.003) * 0.2 + 0.8;
-    ctx.fillStyle = HIGHLIGHT_COLOR;
-    ctx.font = `${20 * pulseAmount}px sans-serif`;
-    ctx.fillText('Press any key to restart', canvas.width / 2, canvas.height * 0.65);
-    
-    // Create occasional particles for visual interest
-    if (Math.random() < 0.1) {
-        createParticles(
-            canvas.width/2 + (Math.random() - 0.5) * 100, 
-            canvas.height/2 + (Math.random() - 0.5) * 100,
-            [ENEMY_COLOR, GEM_COLOR][Math.floor(Math.random() * 2)],
-            2
-        );
-    }
-    drawParticles();
-}
-
-let shrinkingWalls = []; // Store walls that are about to shrink {x, y, timer}
-const SHRINK_WARNING_TIME = 2000; // ms before wall solidifies - longer warning
-
-function shrinkMaze(currentTime) {
-    // Update existing shrinking walls
-    for (let i = shrinkingWalls.length - 1; i >= 0; i--) {
-        shrinkingWalls[i].timer -= 1000 / FPS; // Decrement timer
-        if (shrinkingWalls[i].timer <= 0) {
-            // Timer expired, solidify wall
-            const { x, y } = shrinkingWalls[i];
-            if (grid[y] && grid[y][x] === 0) { // Check if it's still a path
-                grid[y][x] = 1; // Turn into wall
-                createParticles(x * CELL_SIZE + CELL_SIZE/2, y * CELL_SIZE + CELL_SIZE/2, WALL_COLOR, 5);
-            }
-            shrinkingWalls.splice(i, 1); // Remove from shrinking list
-        }
-    }
-
-    // Check if it's time to initiate a new shrink cycle
-    if (currentTime - lastShrinkTime > SHRINK_RATE) {
-        lastShrinkTime = currentTime;
-
-        const { minX, maxX, minY, maxY } = currentGridBounds;
-
-        // Check if shrinking is possible
-        if (maxX - minX <= 7 || maxY - minY <= 7) { // Increased minimum size to prevent too small mazes
-            // Maze is getting too small - check if player won
-            if (gems.length === 0) {
-                // Player collected all gems in small maze - win condition!
-                showVictoryMessage();
-                // After a delay, regenerate a new maze
-                setTimeout(() => {
-                    startGame();
-                }, 3000); 
-            }
-            return; // Stop shrinking when very small
-        }
-
-        // Play sound effect
-        if (sounds.wallShift) sounds.wallShift();
-
-        // Identify walls to start shrinking (outer path layer)
-        for (let y = minY; y <= maxY; y++) {
-            if (grid[y]) {
-                if (grid[y][minX] === 0) shrinkingWalls.push({ x: minX, y: y, timer: SHRINK_WARNING_TIME });
-                if (grid[y][maxX] === 0 && minX !== maxX) shrinkingWalls.push({ x: maxX, y: y, timer: SHRINK_WARNING_TIME });
-            }
-        }
-        for (let x = minX + 1; x < maxX; x++) { // Avoid double-adding corners
-            if (grid[minY] && grid[minY][x] === 0) shrinkingWalls.push({ x: x, y: minY, timer: SHRINK_WARNING_TIME });
-            if (grid[maxY] && grid[maxY][x] === 0 && minY !== maxY) shrinkingWalls.push({ x: x, y: maxY, timer: SHRINK_WARNING_TIME });
-        }
-
-        // Update bounds for next shrink cycle *after* identifying current layer
-        currentGridBounds.minX++;
-        currentGridBounds.maxX--;
-        currentGridBounds.minY++;
-        currentGridBounds.maxY--;
-        
-        // When maze shrinks, sometimes add a new power-up in the middle
-        if (Math.random() < 0.5 && powerUps.length < 3) {
-            const midX = Math.floor((currentGridBounds.minX + currentGridBounds.maxX) / 2);
-            const midY = Math.floor((currentGridBounds.minY + currentGridBounds.maxY) / 2);
-            
-            if (grid[midY][midX] === 0) {
-                const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
-                powerUps.push(new PowerUp(
-                    midX * CELL_SIZE + CELL_SIZE / 2,
-                    midY * CELL_SIZE + CELL_SIZE / 2,
-                    type
-                ));
-                createParticles(
-                    midX * CELL_SIZE + CELL_SIZE / 2,
-                    midY * CELL_SIZE + CELL_SIZE / 2,
-                    HIGHLIGHT_COLOR,
-                    10
-                );
-            }
-        }
-    }
-}
-
-// Add a victory display function
-function showVictoryMessage() {
-    // Create a victory banner
-    const victoryBanner = document.createElement('div');
-    victoryBanner.textContent = `VICTORY! Score: ${score}`;
-    victoryBanner.style.position = 'absolute';
-    victoryBanner.style.top = '50%';
-    victoryBanner.style.left = '50%';
-    victoryBanner.style.transform = 'translate(-50%, -50%)';
-    victoryBanner.style.background = 'rgba(10,10,40,0.8)';
-    victoryBanner.style.color = GEM_COLOR;
-    victoryBanner.style.fontSize = '36px';
-    victoryBanner.style.padding = '20px 40px';
-    victoryBanner.style.borderRadius = '10px';
-    victoryBanner.style.fontWeight = 'bold';
-    victoryBanner.style.boxShadow = `0 0 20px ${HIGHLIGHT_COLOR}`;
-    victoryBanner.style.textAlign = 'center';
-    victoryBanner.style.zIndex = '100';
-    document.body.appendChild(victoryBanner);
-    
-    // Create celebration particles
-    for (let i = 0; i < 100; i++) {
-        setTimeout(() => {
-            createParticles(
-                Math.random() * canvas.width,
-                Math.random() * canvas.height,
-                [GEM_COLOR, PLAYER_COLOR, HIGHLIGHT_COLOR][Math.floor(Math.random() * 3)],
-                5
-            );
-        }, i * 30);
-    }
-    
-    // Remove the banner after the delay
-    setTimeout(() => {
-        document.body.removeChild(victoryBanner);
-    }, 2900);
-    
-    // Play a victory sound if available
-    if (sounds.gemCollect) {
-        // Play multiple times for a victory theme
-        setTimeout(() => sounds.gemCollect(), 0);
-        setTimeout(() => sounds.gemCollect(), 200);
-        setTimeout(() => sounds.gemCollect(), 400);
-        setTimeout(() => sounds.powerUp(), 700);
-    }
-}
+// ...existing code...
 
 // --- Game Loop ---
-let lastTime = 0;
-function gameLoop(currentTime) {
-    const deltaTime = currentTime - lastTime;
-    const interval = 1000 / FPS;
-
-    if (deltaTime >= interval) {
-        lastTime = currentTime - (deltaTime % interval);
-
-        if (gameState === 'start') {
-            drawStartScreen();
-        } else if (gameState === 'playing') {
-            // Update game state
-            updatePlayer();
-            updateEnemies();
-            shrinkMaze(currentTime);
-            
-            // Check if all gems are collected for a win condition
-            if (gems.length === 0) {
-                // Create more gems and add an enemy
-                placeGems();
-                
-                // Add an enemy every other level
-                if (enemies.length < 8 && score % NUM_GEMS === 0) {
-                    placeEnemies();
-                }
-                
-                // Create victory particles
-                createParticles(player.x, player.y, GEM_COLOR, 30);
-            }
-
-            // Draw everything
-            drawMaze();
-            drawPowerUps();
-            drawGems();
-            drawParticles();
-            drawEnemies();
-            drawPlayer();
-            drawActiveEffects();
-            
-        } else if (gameState === 'gameOver') {
-            // Draw final state under the overlay
-            drawMaze();
-            drawGems();
-            drawEnemies();
-            drawParticles();
-            
-            // Draw game over screen last
-            drawGameOverScreen();
-        }
-    }
-
-    requestAnimationFrame(gameLoop);
-}
+// ...existing code...
 
 // --- Initialization ---
 function startGame() {
     // Try to initialize audio on user interaction
     if (audioCtx === null && soundEnabled) {
         initSounds();
+    }
+    
+    // Show control pad on mobile
+    if (isMobile) {
+        controlPad.style.display = 'block';
+    } else {
+        controlPad.style.display = 'none';
     }
 
     score = 0;
@@ -1349,16 +796,23 @@ function startGame() {
     
     // Play game start sound
     if (sounds.gameStart) sounds.gameStart();
+    
+    // Reset touch state
+    player.touchActive = false;
+    player.touchDirection = { x: 0, y: 0 };
 }
 
 // --- Input Handling ---
 let keys = {};
+
+// Desktop key events
 window.addEventListener('keydown', (e) => {
     keys[e.key] = true;
     // Prevent default arrow key scrolling
-    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Space"].includes(e.key)) {
         e.preventDefault();
     }
+    
     // Start game on any key press from start screen
     if (gameState === 'start' || gameState === 'gameOver') {
         startGame();
@@ -1376,24 +830,8 @@ window.addEventListener('keydown', (e) => {
     // M key toggles mute
     if (e.key === 'm' || e.key === 'M') {
         soundEnabled = !soundEnabled;
-        // Show a sound toggle indicator
-        const muteIndicator = document.createElement('div');
-        muteIndicator.textContent = soundEnabled ? 'Sound On' : 'Sound Off';
-        muteIndicator.style.position = 'absolute';
-        muteIndicator.style.top = '50px';
-        muteIndicator.style.right = '20px';
-        muteIndicator.style.background = 'rgba(0,0,0,0.5)';
-        muteIndicator.style.color = 'white';
-        muteIndicator.style.padding = '5px 10px';
-        muteIndicator.style.borderRadius = '5px';
-        muteIndicator.style.transition = 'opacity 1s';
-        document.body.appendChild(muteIndicator);
-        
-        // Remove after 2 seconds
-        setTimeout(() => {
-            muteIndicator.style.opacity = '0';
-            setTimeout(() => document.body.removeChild(muteIndicator), 1000);
-        }, 1000);
+        updateSoundToggleUI();
+        showSoundNotification();
     }
 });
 
@@ -1401,232 +839,198 @@ window.addEventListener('keyup', (e) => {
     keys[e.key] = false;
 });
 
-// Add the missing handleInput function
-function handleInput() {
-    // Store desired velocity based on input
-    player.targetVx = 0;
-    player.targetVy = 0;
-
-    if (keys['ArrowLeft'] || keys['a']) player.targetVx = -1;
-    if (keys['ArrowRight'] || keys['d']) player.targetVx = 1;
-    if (keys['ArrowUp'] || keys['w']) player.targetVy = -1;
-    if (keys['ArrowDown'] || keys['s']) player.targetVy = 1;
-
-    // Prioritize horizontal movement if both keys are pressed
-    if (player.targetVx !== 0) player.targetVy = 0;
-}
-
-// Also add the missing getGridValueAt function
-function getGridValueAt(pixelX, pixelY) {
-    const gridX = Math.floor(pixelX / CELL_SIZE);
-    const gridY = Math.floor(pixelY / CELL_SIZE);
-    if (gridX < 0 || gridX >= GRID_WIDTH || gridY < 0 || gridY >= GRID_HEIGHT) {
-        return 1; // Treat out of bounds as wall
-    }
-    return grid[gridY][gridX];
-}
-
-// Add the missing checkEnemyCollision function
-function checkEnemyCollision() {
-    const playerRadius = player.size / 2;
-    for (const enemy of enemies) {
-        const enemyRadius = enemy.size / 2; // Approximate enemy as circle for collision
-        const dx = player.x - enemy.x;
-        const dy = player.y - enemy.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance < playerRadius + enemyRadius) {
-            return true; // Collision detected
-        }
-    }
-    return false;
-}
-
-// Add the missing updateEnemies function
-function updateEnemies() {
-    const ENEMY_SPEED = PLAYER_SPEED * 0.5; // Base speed for both types
-    const CHASER_SPEED = ENEMY_SPEED * 1.1;  // Chasers are slightly faster
-    const WANDERER_SPEED = ENEMY_SPEED * 0.9; // Wanderers are slightly slower
+// Show notification for sound toggle
+function showSoundNotification() {
+    // Show a sound toggle indicator
+    const muteIndicator = document.createElement('div');
+    muteIndicator.textContent = soundEnabled ? 'Sound On' : 'Sound Off';
+    muteIndicator.style.position = 'absolute';
+    muteIndicator.style.top = '50px';
+    muteIndicator.style.right = '20px';
+    muteIndicator.style.background = 'rgba(0,0,0,0.5)';
+    muteIndicator.style.color = 'white';
+    muteIndicator.style.padding = '5px 10px';
+    muteIndicator.style.borderRadius = '5px';
+    muteIndicator.style.transition = 'opacity 1s';
+    document.body.appendChild(muteIndicator);
     
-    const CHASER_COOLDOWN = 0.5 * FPS;  // Chasers make decisions more frequently
-    const WANDERER_COOLDOWN = 1.5 * FPS; // Wanderers change direction less frequently
+    // Remove after 2 seconds
+    setTimeout(() => {
+        muteIndicator.style.opacity = '0';
+        setTimeout(() => document.body.removeChild(muteIndicator), 1000);
+    }, 1000);
+}
 
-    enemies.forEach(enemy => {
-        enemy.moveCooldown -= 1;
+// --- Mobile Touch Controls ---
+
+// Sound toggle button
+soundToggle.addEventListener('click', () => {
+    soundEnabled = !soundEnabled;
+    updateSoundToggleUI();
+    // Try to initialize audio context on first click
+    if (audioCtx === null && soundEnabled) {
+        initSounds();
+    }
+});
+
+// Touch control variables
+let touchStartX = 0;
+let touchStartY = 0;
+let lastTapTime = 0;
+
+// Process swipe direction
+function handleSwipe(endX, endY) {
+    const deltaX = endX - touchStartX;
+    const deltaY = endY - touchStartY;
+    
+    // Minimum distance for a swipe
+    const minDistance = 30;
+    
+    if (Math.abs(deltaX) < minDistance && Math.abs(deltaY) < minDistance) {
+        return; // Not a swipe - too short
+    }
+    
+    // Determine primary direction
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        // Horizontal swipe
+        player.touchDirection.x = deltaX > 0 ? 1 : -1;
+        player.touchDirection.y = 0;
+    } else {
+        // Vertical swipe
+        player.touchDirection.x = 0;
+        player.touchDirection.y = deltaY > 0 ? 1 : -1;
+    }
+    
+    player.touchActive = true;
+}
+
+// Touch event handlers for canvas
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    
+    // Check for double tap (for level restart)
+    const currentTime = new Date().getTime();
+    const tapLength = currentTime - lastTapTime;
+    if (tapLength < 300 && tapLength > 0 && gameState === 'playing') {
+        // Double tap detected, restart level
+        const currentScore = score;
+        startGame();
+        score = currentScore;
+        scoreDisplay.textContent = `Score: ${score}`;
+    }
+    lastTapTime = currentTime;
+    
+    // Start game from start screen
+    if (gameState === 'start' || gameState === 'gameOver') {
+        startGame();
+    }
+}, false);
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (gameState !== 'playing') return;
+    
+    const touch = e.touches[0];
+    handleSwipe(touch.clientX, touch.clientY);
+}, false);
+
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    // Stop movement when touch ends
+    if (player.touchActive) {
+        player.touchActive = false;
+        player.touchDirection = { x: 0, y: 0 };
+    }
+}, false);
+
+// On-screen control pad
+if (isMobile) {
+    // Direction button handlers
+    document.getElementById('upBtn').addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        player.touchDirection = { x: 0, y: -1 };
+        player.touchActive = true;
+    });
+    
+    document.getElementById('leftBtn').addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        player.touchDirection = { x: -1, y: 0 };
+        player.touchActive = true;
+    });
+    
+    document.getElementById('rightBtn').addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        player.touchDirection = { x: 1, y: 0 };
+        player.touchActive = true;
+    });
+    
+    document.getElementById('downBtn').addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        player.touchDirection = { x: 0, y: 1 };
+        player.touchActive = true;
+    });
+    
+    // Common touchend handler for all buttons
+    const directionButtons = document.querySelectorAll('.control-btn');
+    directionButtons.forEach(btn => {
+        btn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            player.touchActive = false;
+            player.touchDirection = { x: 0, y: 0 };
+        });
         
-        // Update enemy position in the grid for tracking
-        enemy.gridX = Math.floor(enemy.x / CELL_SIZE);
-        enemy.gridY = Math.floor(enemy.y / CELL_SIZE);
-        
-        // Animate eyes
-        enemy.eyes.angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-        enemy.eyes.blinkTimer -= 1;
-        if (enemy.eyes.blinkTimer <= 0) {
-            enemy.eyes.blinkTimer = Math.random() * 100 + 50; // Random blink timing
-        }
-
-        // Different behavior based on enemy type
-        if (enemy.moveCooldown <= 0) {
-            let currentSpeed = enemy.type === ENEMY_TYPES.CHASER ? CHASER_SPEED : WANDERER_SPEED;
-            
-            // Get current grid position
-            const currentGridX = Math.floor(enemy.x / CELL_SIZE);
-            const currentGridY = Math.floor(enemy.y / CELL_SIZE);
-            const playerGridX = Math.floor(player.x / CELL_SIZE);
-            const playerGridY = Math.floor(player.y / CELL_SIZE);
-            
-            // Get possible moves (adjacent open cells)
-            const possibleMoves = [];
-            const directions = [[0, -1], [0, 1], [-1, 0], [1, 0]]; // N, S, W, E
-            
-            for (const [dx, dy] of directions) {
-                const nextGridX = currentGridX + dx;
-                const nextGridY = currentGridY + dy;
-                if (getGridValueAt(nextGridX * CELL_SIZE + CELL_SIZE / 2, nextGridY * CELL_SIZE + CELL_SIZE / 2) === 0) {
-                    possibleMoves.push({ 
-                        vx: dx * currentSpeed, 
-                        vy: dy * currentSpeed,
-                        dx: dx, // Store direction units for decision making
-                        dy: dy
-                    });
-                }
-            }
-            
-            if (possibleMoves.length > 0) {
-                if (enemy.type === ENEMY_TYPES.CHASER) {
-                    // CHASER BEHAVIOR: Try to move towards player
-                    
-                    // First check if player is in direct line of sight
-                    let targetMove = null;
-                    if (currentGridX === playerGridX) { // Same column
-                        let pathClear = true;
-                        let step = Math.sign(playerGridY - currentGridY);
-                        for (let y = currentGridY + step; y !== playerGridY; y += step) {
-                            if (grid[y][currentGridX] === 1) { pathClear = false; break; }
-                        }
-                        if (pathClear && step !== 0) {
-                            // Direct path available vertically
-                            targetMove = possibleMoves.find(m => m.dy === step && m.dx === 0);
-                        }
-                    } else if (currentGridY === playerGridY) { // Same row
-                        let pathClear = true;
-                        let step = Math.sign(playerGridX - currentGridX);
-                        for (let x = currentGridX + step; x !== playerGridX; x += step) {
-                            if (grid[currentGridY][x] === 1) { pathClear = false; break; }
-                        }
-                        if (pathClear && step !== 0) {
-                            // Direct path available horizontally
-                            targetMove = possibleMoves.find(m => m.dx === step && m.dy === 0);
-                        }
-                    }
-                    
-                    // If no direct path, choose move that gets closer to player
-                    if (!targetMove) {
-                        // Determine which axis has greater distance to player
-                        const xDist = Math.abs(playerGridX - currentGridX);
-                        const yDist = Math.abs(playerGridY - currentGridY);
-                        
-                        if (xDist >= yDist) {
-                            // Prioritize horizontal movement
-                            const xStep = Math.sign(playerGridX - currentGridX);
-                            targetMove = possibleMoves.find(m => m.dx === xStep && m.dy === 0);
-                            
-                            // If horizontal move is blocked, try vertical
-                            if (!targetMove) {
-                                const yStep = Math.sign(playerGridY - currentGridY);
-                                targetMove = possibleMoves.find(m => m.dy === yStep && m.dx === 0);
-                            }
-                        } else {
-                            // Prioritize vertical movement
-                            const yStep = Math.sign(playerGridY - currentGridY);
-                            targetMove = possibleMoves.find(m => m.dy === yStep && m.dx === 0);
-                            
-                            // If vertical move is blocked, try horizontal
-                            if (!targetMove) {
-                                const xStep = Math.sign(playerGridX - currentGridX);
-                                targetMove = possibleMoves.find(m => m.dx === xStep && m.dy === 0);
-                            }
-                        }
-                    }
-                    
-                    // If still no good move, pick a random valid move
-                    if (!targetMove) {
-                        targetMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
-                    }
-                    
-                    enemy.vx = targetMove.vx;
-                    enemy.vy = targetMove.vy;
-                    enemy.moveCooldown = CHASER_COOLDOWN;
-                    
-                } else { // WANDERER BEHAVIOR
-                    // Pick a random direction, but try not to reverse direction if possible
-                    let validMoves = possibleMoves.filter(move => 
-                        move.vx !== -enemy.vx || move.vy !== -enemy.vy
-                    );
-                    
-                    if (validMoves.length === 0) {
-                        validMoves = possibleMoves; // Must reverse if it's the only option
-                    }
-                    
-                    const move = validMoves[Math.floor(Math.random() * validMoves.length)];
-                    enemy.vx = move.vx;
-                    enemy.vy = move.vy;
-                    
-                    // Wanderers keep moving in the same direction longer
-                    enemy.moveCooldown = WANDERER_COOLDOWN + Math.random() * WANDERER_COOLDOWN/2;
-                }
-            } else {
-                // No valid moves, stay still
-                enemy.vx = 0;
-                enemy.vy = 0;
-                enemy.moveCooldown = 10; // Short cooldown to try again soon
-            }
-        }
-
-        // --- Enemy Collision & Movement ---
-        const nextX = enemy.x + enemy.vx;
-        const nextY = enemy.y + enemy.vy;
-        const enemyHalfSize = enemy.size / 2 - 1; // Padding
-
-        let collisionX = false;
-        let collisionY = false;
-
-        // Check X collision
-        if (enemy.vx !== 0) {
-            const checkPixelX = enemy.vx > 0 ? nextX + enemyHalfSize : nextX - enemyHalfSize;
-            if (getGridValueAt(checkPixelX, enemy.y - enemyHalfSize) === 1 ||
-                getGridValueAt(checkPixelX, enemy.y + enemyHalfSize) === 1) {
-                collisionX = true;
-                enemy.x = enemy.vx > 0 ? 
-                    Math.floor(enemy.x / CELL_SIZE) * CELL_SIZE + CELL_SIZE - enemyHalfSize - 1 : 
-                    Math.floor(enemy.x / CELL_SIZE) * CELL_SIZE + enemyHalfSize + 1;
-                enemy.vx = 0;
-                enemy.moveCooldown = 0; // Force direction change if bumped
-            }
-        }
-        
-        // Check Y collision
-        if (enemy.vy !== 0) {
-            const checkPixelY = enemy.vy > 0 ? nextY + enemyHalfSize : nextY - enemyHalfSize;
-            if (getGridValueAt(enemy.x - enemyHalfSize, checkPixelY) === 1 ||
-                getGridValueAt(enemy.x + enemyHalfSize, checkPixelY) === 1) {
-                collisionY = true;
-                enemy.y = enemy.vy > 0 ? 
-                    Math.floor(enemy.y / CELL_SIZE) * CELL_SIZE + CELL_SIZE - enemyHalfSize - 1 : 
-                    Math.floor(enemy.y / CELL_SIZE) * CELL_SIZE + enemyHalfSize + 1;
-                enemy.vy = 0;
-                enemy.moveCooldown = 0; // Force direction change
-            }
-        }
-
-        // Apply movement if no collision
-        if (!collisionX) enemy.x = nextX;
-        if (!collisionY) enemy.y = nextY;
-
-        // Keep enemies within canvas bounds
-        enemy.x = Math.max(enemy.size / 2, Math.min(canvas.width - enemy.size / 2, enemy.x));
-        enemy.y = Math.max(enemy.size / 2, Math.min(canvas.height - enemy.size / 2, enemy.y));
+        // Cancel movement if touch moves out of the button
+        btn.addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            player.touchActive = false;
+            player.touchDirection = { x: 0, y: 0 };
+        });
     });
 }
 
-// Start the game loop without waiting for audio initialization
+// Handle desktop and mobile input together
+function handleInput() {
+    // Only apply keyboard controls if touch is not active
+    if (!player.touchActive) {
+        player.targetVx = 0;
+        player.targetVy = 0;
+
+        if (keys['ArrowLeft'] || keys['a']) player.targetVx = -1;
+        if (keys['ArrowRight'] || keys['d']) player.targetVx = 1;
+        if (keys['ArrowUp'] || keys['w']) player.targetVy = -1;
+        if (keys['ArrowDown'] || keys['s']) player.targetVy = 1;
+
+        // Prioritize horizontal movement if both keys are pressed
+        if (player.targetVx !== 0) player.targetVy = 0;
+    }
+    // If touch is active, player.touchDirection is already being used
+}
+
+// Prevent browser's default touch actions on mobile
+document.addEventListener('touchmove', function(e) {
+    if (e.target === canvas) {
+        e.preventDefault();
+    }
+}, { passive: false });
+
+// Also prevent zoom and other gestures
+document.addEventListener('gesturestart', function(e) {
+    e.preventDefault();
+});
+
+// Setup mobile UI on load
+window.addEventListener('load', () => {
+    updateSoundToggleUI();
+    if (isMobile) {
+        controlPad.style.display = 'block';
+    }
+});
+
+// --- Rest of the code (existing functions) ---
+// ...existing code...
+
+// Start the game loop
 requestAnimationFrame(gameLoop);

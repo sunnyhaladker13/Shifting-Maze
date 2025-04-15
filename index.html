@@ -2,15 +2,36 @@
 <html>
 <head>
     <title>Shifting Maze</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <style>
         body { margin: 0; overflow: hidden; background-color: #1e1e1e; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
         canvas { border: 2px solid #333; }
         #score { position: absolute; top: 10px; left: 10px; color: #f0f0f0; font-family: sans-serif; font-size: 1.2em; }
+        #soundToggle { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.5); color: #fff; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; }
+        #gameContainer { position: relative; display: flex; justify-content: center; align-items: center; }
+        #controlPad { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: none; }
+        .control-btn { width: 50px; height: 50px; background: rgba(255,255,255,0.15); border-radius: 50%; margin: 5px; border: 2px solid rgba(255,255,255,0.3); color: white; font-size: 20px; display: flex; justify-content: center; align-items: center; user-select: none; }
+        .up-btn { grid-column: 2; grid-row: 1; }
+        .left-btn { grid-column: 1; grid-row: 2; }
+        .right-btn { grid-column: 3; grid-row: 2; }
+        .down-btn { grid-column: 2; grid-row: 3; }
+        #controlPad-grid { display: grid; grid-template-columns: repeat(3, auto); grid-template-rows: repeat(3, auto); }
     </style>
 </head>
 <body>
-    <canvas id="gameCanvas"></canvas>
-    <div id="score">Score: 0</div>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="score">Score: 0</div>
+        <button id="soundToggle">🔊</button>
+        <div id="controlPad">
+            <div id="controlPad-grid">
+                <div class="control-btn up-btn" id="upBtn">⬆️</div>
+                <div class="control-btn left-btn" id="leftBtn">⬅️</div>
+                <div class="control-btn right-btn" id="rightBtn">➡️</div>
+                <div class="control-btn down-btn" id="downBtn">⬇️</div>
+            </div>
+        </div>
+    </div>
     <script src="script.js"></script>
 </body>
 </html>
