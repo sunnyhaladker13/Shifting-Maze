@@ -2,7 +2,7 @@
 
 A dynamic maze game where you navigate through an ever-shrinking labyrinth while collecting gems and avoiding enemies.
 
-![Shifting Maze Game Screenshot](screenshot.png)
+<img width="724" alt="Screenshot 2025-04-16 at 12 24 25 AM" src="https://github.com/user-attachments/assets/1e7ade9e-9bdd-450a-b028-52f25d36084c" />
 
 ## 🎮 Play the Game
 
